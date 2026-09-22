@@ -1,12 +1,29 @@
 // =====================================================
 // Staff Authentication Routes
+// REPAIR ROOM - CMOB Department
+// =====================================================
+//
+// Public:
+// - Login
+// - Setup status
+//
+// Protected:
+// - Current staff account
+// - Logout
+// - Update name
+// - Change password
+//
+// IMPORTANT:
+// Public staff registration is intentionally NOT exposed.
+// Existing staff accounts are managed internally.
+//
 // =====================================================
 
-const express = require("express");
+const express =
+  require("express");
 
 const {
   setupStatus,
-  register,
   login,
   me,
   logout,
@@ -22,17 +39,17 @@ const {
   "../middleware/authMiddleware"
 );
 
-const router = express.Router();
+const router =
+  express.Router();
 
-// Public routes
+
+// =====================================================
+// PUBLIC
+// =====================================================
+
 router.get(
   "/setup-status",
   setupStatus
-);
-
-router.post(
-  "/register",
-  register
 );
 
 router.post(
@@ -40,7 +57,11 @@ router.post(
   login
 );
 
-// Protected routes
+
+// =====================================================
+// STAFF ONLY
+// =====================================================
+
 router.get(
   "/me",
   requireStaff,
@@ -64,5 +85,6 @@ router.put(
   requireStaff,
   changePassword
 );
+
 
 module.exports = router;

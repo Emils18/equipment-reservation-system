@@ -1,541 +1,844 @@
 // =====================================================
-// Staff Equipment Page
+// REPAIR ROOM - EQUIPMENT INVENTORY
+// CMOB Department
+// =====================================================
 //
-// Active:
-// View / Edit / Archive
+// Features:
+// ✓ Create / View / Edit equipment
+// ✓ Archive / Restore / Permanent Delete
+// ✓ Real-time Socket.IO refresh
+// ✓ Search by name, asset code, category, description
+// ✓ Automatic Category filter
+// ✓ Active / Archived visibility
+// ✓ Full-screen ModalPortal
 //
-// Archived:
-// View / Edit / Restore / Delete Permanently
 // =====================================================
 
 import {
+  useCallback,
   useEffect,
+  useMemo,
   useState,
 } from "react";
 
 import api from "../../services/api";
+import socket from "../../services/socket";
+
+import ModalPortal from "../../components/ModalPortal";
+
+
+const EMPTY_FORM = {
+  name: "",
+  category: "",
+  asset_code: "",
+  description: "",
+  condition_status:
+    "good",
+};
 
 
 function Items() {
-  const [items, setItems] =
-    useState([]);
+  const [
+    items,
+    setItems,
+  ] = useState([]);
 
-  const [loading, setLoading] =
-    useState(true);
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
 
-  const [message, setMessage] =
-    useState("");
+  const [
+    message,
+    setMessage,
+  ] = useState("");
 
-  const [messageType, setMessageType] =
-    useState("success");
+  const [
+    messageType,
+    setMessageType,
+  ] = useState(
+    "success"
+  );
 
-  const [showModal, setShowModal] =
-    useState(false);
+  const [
+    search,
+    setSearch,
+  ] = useState("");
 
-  const [modalMode, setModalMode] =
-    useState("create");
+  const [
+    categoryFilter,
+    setCategoryFilter,
+  ] = useState("");
 
-  const [selectedItem, setSelectedItem] =
-    useState(null);
+  const [
+    showModal,
+    setShowModal,
+  ] = useState(false);
 
-  const [form, setForm] =
-    useState({
-      name: "",
-      category: "",
-      asset_code: "",
-      description: "",
-      condition_status: "good",
-    });
+  const [
+    modalMode,
+    setModalMode,
+  ] = useState(
+    "create"
+  );
+
+  const [
+    selectedItem,
+    setSelectedItem,
+  ] = useState(null);
+
+  const [
+    saving,
+    setSaving,
+  ] = useState(false);
+
+  const [
+    form,
+    setForm,
+  ] = useState({
+    ...EMPTY_FORM,
+  });
 
 
-  // =====================================================
-  // Load Equipment
-  // =====================================================
+  // ===================================================
+  // LOAD INVENTORY
+  // ===================================================
 
-  const loadItems = async () => {
-    try {
-      setLoading(true);
+  const loadItems =
+    useCallback(
+      async (
+        silent = false
+      ) => {
+        try {
+          if (
+            !silent
+          ) {
+            setLoading(
+              true
+            );
+          }
 
-      const response =
-        await api.get("/items");
+          const response =
+            await api.get(
+              "/items"
+            );
 
-      setItems(
-        response.data.items || []
-      );
-    } catch (error) {
-      console.error(
-        "Load items error:",
-        error
-      );
+          setItems(
+            response.data
+              .items ||
+              []
+          );
+        } catch (error) {
+          console.error(
+            "Load items error:",
+            error
+          );
 
-      showMessage(
-        "Could not load equipment.",
-        "error"
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+          setMessage(
+            "Could not load equipment."
+          );
+
+          setMessageType(
+            "error"
+          );
+        } finally {
+          if (
+            !silent
+          ) {
+            setLoading(
+              false
+            );
+          }
+        }
+      },
+      []
+    );
 
 
   useEffect(() => {
     loadItems();
-  }, []);
+
+    const handleEquipmentUpdated =
+      () => {
+        loadItems(
+          true
+        );
+      };
+
+    socket.on(
+      "equipment_updated",
+      handleEquipmentUpdated
+    );
+
+    return () => {
+      socket.off(
+        "equipment_updated",
+        handleEquipmentUpdated
+      );
+    };
+  }, [
+    loadItems,
+  ]);
 
 
-  // =====================================================
-  // Messages
-  // =====================================================
+  // ===================================================
+  // FILTERS
+  // ===================================================
 
-  const showMessage = (
-    text,
-    type = "success"
-  ) => {
-    setMessage(text);
-    setMessageType(type);
+  const categories =
+    useMemo(
+      () =>
+        [
+          ...new Set(
+            items
+              .map(
+                (
+                  item
+                ) =>
+                  item.category
+                    ?.trim()
+              )
+              .filter(
+                Boolean
+              )
+          ),
+        ].sort(
+          (
+            a,
+            b
+          ) =>
+            a.localeCompare(
+              b
+            )
+        ),
+      [
+        items,
+      ]
+    );
+
+
+  const filteredItems =
+    useMemo(() => {
+      const query =
+        search
+          .trim()
+          .toLowerCase();
+
+      return items.filter(
+        (
+          item
+        ) => {
+          const matchesCategory =
+            !categoryFilter ||
+            item.category ===
+              categoryFilter;
+
+          if (
+            !matchesCategory
+          ) {
+            return false;
+          }
+
+          if (
+            !query
+          ) {
+            return true;
+          }
+
+          const haystack = [
+            item.name,
+            item.asset_code,
+            item.category,
+            item.description,
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase();
+
+          return haystack.includes(
+            query
+          );
+        }
+      );
+    }, [
+      items,
+      search,
+      categoryFilter,
+    ]);
+
+
+  const filtersActive =
+    Boolean(
+      search.trim() ||
+      categoryFilter
+    );
+
+
+  const clearFilters = () => {
+    setSearch("");
+    setCategoryFilter("");
   };
 
 
-  // =====================================================
-  // Form Change
-  // =====================================================
+  // ===================================================
+  // FORM / MODAL
+  // ===================================================
 
-  const handleChange = (
-    event
-  ) => {
-    const {
-      name,
-      value,
-    } = event.target;
+  const showMessage =
+    (
+      text,
+      type = "success"
+    ) => {
+      setMessage(
+        text
+      );
 
-    setForm((previous) => ({
-      ...previous,
-      [name]: value,
-    }));
-  };
+      setMessageType(
+        type
+      );
+    };
 
 
-  // =====================================================
-  // Create
-  // =====================================================
+  const handleChange =
+    (
+      event
+    ) => {
+      const {
+        name,
+        value,
+      } =
+        event.target;
+
+      setForm(
+        (
+          previous
+        ) => ({
+          ...previous,
+
+          [name]:
+            value,
+        })
+      );
+    };
+
 
   const openCreate = () => {
-    setModalMode("create");
+    setModalMode(
+      "create"
+    );
 
-    setSelectedItem(null);
+    setSelectedItem(
+      null
+    );
 
     setForm({
-      name: "",
-      category: "",
-      asset_code: "",
-      description: "",
-      condition_status: "good",
+      ...EMPTY_FORM,
     });
 
-    setShowModal(true);
+    setShowModal(
+      true
+    );
   };
 
 
-  // =====================================================
-  // View
-  // =====================================================
+  const openView = (
+    item
+  ) => {
+    setModalMode(
+      "view"
+    );
 
-  const openView = (item) => {
-    setModalMode("view");
+    setSelectedItem(
+      item
+    );
 
-    setSelectedItem(item);
-
-    setShowModal(true);
+    setShowModal(
+      true
+    );
   };
 
 
-  // =====================================================
-  // Edit
-  // =====================================================
+  const openEdit = (
+    item
+  ) => {
+    setModalMode(
+      "edit"
+    );
 
-  const openEdit = (item) => {
-    setModalMode("edit");
-
-    setSelectedItem(item);
+    setSelectedItem(
+      item
+    );
 
     setForm({
       name:
-        item.name || "",
+        item.name ||
+        "",
 
       category:
-        item.category || "",
+        item.category ||
+        "",
 
       asset_code:
-        item.asset_code || "",
+        item.asset_code ||
+        "",
 
       description:
-        item.description || "",
+        item.description ||
+        "",
 
       condition_status:
         item.condition_status ||
         "good",
     });
 
-    setShowModal(true);
+    setShowModal(
+      true
+    );
   };
 
-
-  // =====================================================
-  // Close Modal
-  // =====================================================
 
   const closeModal = () => {
-    setShowModal(false);
+    if (
+      saving
+    ) {
+      return;
+    }
 
-    setSelectedItem(null);
+    setShowModal(
+      false
+    );
+
+    setSelectedItem(
+      null
+    );
   };
 
 
-  // =====================================================
-  // Save Create / Edit
-  // =====================================================
+  const handleSubmit =
+    async (
+      event
+    ) => {
+      event.preventDefault();
 
-  const handleSubmit = async (
-    event
-  ) => {
-    event.preventDefault();
-
-    try {
-      if (
-        modalMode === "create"
-      ) {
-        await api.post(
-          "/items",
-          form
+      try {
+        setSaving(
+          true
         );
+
+        if (
+          modalMode ===
+          "create"
+        ) {
+          await api.post(
+            "/items",
+            form
+          );
+
+          showMessage(
+            "Equipment created successfully."
+          );
+        } else {
+          await api.put(
+            `/items/${selectedItem.id}`,
+            form
+          );
+
+          showMessage(
+            "Equipment updated successfully."
+          );
+        }
+
+        setShowModal(
+          false
+        );
+
+        setSelectedItem(
+          null
+        );
+
+        await loadItems(
+          true
+        );
+      } catch (error) {
+        showMessage(
+          error.response
+            ?.data
+            ?.message ||
+            "Could not save equipment.",
+
+          "error"
+        );
+      } finally {
+        setSaving(
+          false
+        );
+      }
+    };
+
+
+  // ===================================================
+  // INVENTORY ACTIONS
+  // ===================================================
+
+  const archiveItem =
+    async (
+      item
+    ) => {
+      if (
+        !window.confirm(
+          `Archive "${item.name}"?\n\nIt will disappear from the borrower side, but can be restored later.`
+        )
+      ) {
+        return;
+      }
+
+      try {
+        const response =
+          await api.patch(
+            `/items/${item.id}/archive`
+          );
 
         showMessage(
-          "Equipment created successfully."
+          response.data
+            .message ||
+            "Equipment archived."
         );
+
+        await loadItems(
+          true
+        );
+      } catch (error) {
+        showMessage(
+          error.response
+            ?.data
+            ?.message ||
+            "Could not archive equipment.",
+
+          "error"
+        );
+      }
+    };
+
+
+  const restoreItem =
+    async (
+      item
+    ) => {
+      try {
+        const response =
+          await api.patch(
+            `/items/${item.id}/restore`
+          );
+
+        showMessage(
+          response.data
+            .message ||
+            "Equipment restored."
+        );
+
+        await loadItems(
+          true
+        );
+      } catch (error) {
+        showMessage(
+          error.response
+            ?.data
+            ?.message ||
+            "Could not restore equipment.",
+
+          "error"
+        );
+      }
+    };
+
+
+  const deleteItem =
+    async (
+      item
+    ) => {
+      if (
+        !window.confirm(
+          `Permanently delete "${item.name}"?\n\nThis cannot be undone.`
+        )
+      ) {
+        return;
       }
 
       if (
-        modalMode === "edit"
+        !window.confirm(
+          `Are you absolutely sure?\n\n"${item.name}" will be permanently removed.`
+        )
       ) {
-        await api.put(
-          `/items/${selectedItem.id}`,
-          form
-        );
-
-        showMessage(
-          "Equipment updated successfully."
-        );
+        return;
       }
 
-      closeModal();
+      try {
+        const response =
+          await api.delete(
+            `/items/${item.id}`
+          );
 
-      await loadItems();
-    } catch (error) {
-      console.error(
-        "Save equipment error:",
-        error
-      );
-
-      showMessage(
-        error.response?.data?.message ||
-          "Could not save equipment.",
-
-        "error"
-      );
-    }
-  };
-
-
-  // =====================================================
-  // Archive
-  // =====================================================
-
-  const archiveItem = async (
-    item
-  ) => {
-    const confirmed =
-      window.confirm(
-        `Archive "${item.name}"?\n\nIt will disappear from the borrower side, but you can restore it later.`
-      );
-
-    if (!confirmed) {
-      return;
-    }
-
-    try {
-      const response =
-        await api.patch(
-          `/items/${item.id}/archive`
+        showMessage(
+          response.data
+            .message ||
+            "Equipment deleted."
         );
 
-      showMessage(
-        response.data.message
-      );
-
-      await loadItems();
-    } catch (error) {
-      showMessage(
-        error.response?.data?.message ||
-          "Could not archive equipment.",
-
-        "error"
-      );
-    }
-  };
-
-
-  // =====================================================
-  // Restore
-  // =====================================================
-
-  const restoreItem = async (
-    item
-  ) => {
-    try {
-      const response =
-        await api.patch(
-          `/items/${item.id}/restore`
+        await loadItems(
+          true
         );
+      } catch (error) {
+        showMessage(
+          error.response
+            ?.data
+            ?.message ||
+            "Could not permanently delete equipment.",
 
-      showMessage(
-        response.data.message
-      );
-
-      await loadItems();
-    } catch (error) {
-      showMessage(
-        error.response?.data?.message ||
-          "Could not restore equipment.",
-
-        "error"
-      );
-    }
-  };
-
-
-  // =====================================================
-  // Permanent Delete
-  // =====================================================
-
-  const deleteItem = async (
-    item
-  ) => {
-    const firstConfirm =
-      window.confirm(
-        `Permanently delete "${item.name}"?\n\nThis cannot be undone.`
-      );
-
-    if (!firstConfirm) {
-      return;
-    }
-
-    const secondConfirm =
-      window.confirm(
-        `Are you absolutely sure?\n\n"${item.name}" will be permanently removed.`
-      );
-
-    if (!secondConfirm) {
-      return;
-    }
-
-    try {
-      const response =
-        await api.delete(
-          `/items/${item.id}`
+          "error"
         );
-
-      showMessage(
-        response.data.message
-      );
-
-      await loadItems();
-    } catch (error) {
-      showMessage(
-        error.response?.data?.message ||
-          "Could not permanently delete equipment.",
-
-        "error"
-      );
-    }
-  };
+      }
+    };
 
 
-  // =====================================================
-  // Condition Style
-  // =====================================================
+  // ===================================================
+  // STYLES
+  // ===================================================
 
-  const getConditionStyle = (
-    condition
-  ) => {
-    if (
-      condition === "good"
-    ) {
-      return "bg-emerald-50 text-emerald-700";
-    }
+  const conditionStyle =
+    (
+      condition
+    ) => {
+      if (
+        condition ===
+        "good"
+      ) {
+        return "bg-emerald-100 text-emerald-700";
+      }
 
-    if (
-      condition === "damaged"
-    ) {
-      return "bg-red-50 text-red-700";
-    }
+      if (
+        condition ===
+        "damaged"
+      ) {
+        return "bg-red-100 text-red-700";
+      }
 
-    return "bg-amber-50 text-amber-700";
-  };
+      return "bg-amber-100 text-amber-700";
+    };
 
+
+  // ===================================================
+  // PAGE
+  // ===================================================
 
   return (
     <div className="animate-fade-up">
 
-      {/* =================================================
-          Header
-          ================================================= */}
+      {/* HEADER */}
 
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
 
         <div>
-          <p className="text-sm font-bold uppercase tracking-wider text-blue-600">
-            Inventory
+
+          <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-blue-600">
+            Repair Room Inventory
           </p>
 
-          <h1 className="mt-1 text-3xl font-black text-slate-900">
+          <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">
             Equipment Items
           </h1>
 
-          <p className="mt-2 text-slate-500">
-            Manage equipment available
-            for reservation.
+          <p className="mt-2 text-sm leading-6 text-slate-500 sm:text-base">
+            Manage CMOB Department equipment available for reservation.
           </p>
+
         </div>
 
 
         <button
-          onClick={openCreate}
-          className="
-            rounded-xl
-            bg-blue-600
-            px-5 py-3
-            font-bold text-white
-            shadow-md shadow-blue-200
-            transition
-            hover:bg-blue-700
-          "
+          type="button"
+          onClick={
+            openCreate
+          }
+          className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white shadow-lg shadow-blue-200 transition hover:bg-blue-700"
         >
-          + Create Item
+          + Create Equipment
         </button>
 
       </div>
 
 
-      {/* =================================================
-          Message
-          ================================================= */}
+      {/* FILTER BAR */}
 
-      {message && (
-        <div
-          className={`
-            mb-6 rounded-xl
-            border px-4 py-3
-            text-sm font-semibold
+      <div className="mb-5 rounded-2xl border border-blue-100 bg-white p-4 shadow-sm">
 
-            ${
-              messageType ===
-              "error"
-                ? "border-red-200 bg-red-50 text-red-700"
-                : "border-blue-100 bg-blue-50 text-blue-700"
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+
+          <div className="relative flex-1">
+
+            <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-slate-400">
+              ⌕
+            </span>
+
+            <input
+              type="search"
+              value={
+                search
+              }
+              onChange={
+                (
+                  event
+                ) =>
+                  setSearch(
+                    event.target.value
+                  )
+              }
+              placeholder="Search name, asset code, category or description..."
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-sm text-slate-800 outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+            />
+
+          </div>
+
+
+          <select
+            value={
+              categoryFilter
             }
-          `}
-        >
-          {message}
+            onChange={
+              (
+                event
+              ) =>
+                setCategoryFilter(
+                  event.target.value
+                )
+            }
+            className="min-w-52 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+          >
+
+            <option value="">
+              All Categories
+            </option>
+
+            {categories.map(
+              (
+                category
+              ) => (
+                <option
+                  key={
+                    category
+                  }
+                  value={
+                    category
+                  }
+                >
+                  {
+                    category
+                  }
+                </option>
+              )
+            )}
+
+          </select>
+
+
+          {filtersActive && (
+            <button
+              type="button"
+              onClick={
+                clearFilters
+              }
+              className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+            >
+              Clear
+            </button>
+          )}
+
         </div>
-      )}
 
 
-      {/* =================================================
-          Information
-          ================================================= */}
-
-      <div className="mb-6 grid gap-4 md:grid-cols-2">
-
-        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
-          <p className="font-bold text-emerald-800">
-            Active Equipment
-          </p>
-
-          <p className="mt-1 text-sm text-emerald-700">
-            Visible and selectable by
-            borrowers.
-          </p>
-        </div>
-
-
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <p className="font-bold text-slate-700">
-            Archived Equipment
-          </p>
-
-          <p className="mt-1 text-sm text-slate-500">
-            Hidden from borrowers.
-            Staff can restore or permanently
-            delete it.
-          </p>
-        </div>
+        <p className="mt-3 text-xs font-semibold text-slate-500">
+          Showing{" "}
+          <strong className="text-slate-800">
+            {
+              filteredItems.length
+            }
+          </strong>
+          {" "}
+          of{" "}
+          <strong className="text-slate-800">
+            {
+              items.length
+            }
+          </strong>
+          {" "}
+          equipment item
+          {
+            items.length ===
+            1
+              ? ""
+              : "s"
+          }.
+        </p>
 
       </div>
 
 
-      {/* =================================================
-          Equipment Table
-          ================================================= */}
+      {/* MESSAGE */}
 
-      <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-sm">
-
-        <div className="border-b border-slate-100 px-6 py-5">
-
-          <h2 className="text-xl font-black text-slate-900">
-            Current Equipment
-          </h2>
-
-          <p className="mt-1 text-sm text-slate-500">
-            {items.length} equipment record
-            {items.length !== 1
-              ? "s"
-              : ""}
-          </p>
-
+      {message && (
+        <div
+          className={`mb-5 rounded-xl border px-4 py-3 text-sm font-semibold ${
+            messageType ===
+            "error"
+              ? "border-red-200 bg-red-50 text-red-700"
+              : "border-blue-200 bg-blue-50 text-blue-700"
+          }`}
+        >
+          {
+            message
+          }
         </div>
+      )}
 
+
+      {/* DESKTOP TABLE */}
+
+      <div className="hidden overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-sm md:block">
 
         {loading ? (
-          <div className="p-12 text-center text-slate-500">
-            Loading equipment...
-          </div>
+
+          <Loading />
+
         ) : (
 
           <div className="overflow-x-auto">
 
-            <table className="w-full">
+            <table className="min-w-[900px] w-full">
 
-              <thead className="bg-blue-50/60">
+              <thead className="bg-blue-50">
 
-                <tr className="text-left text-xs font-bold uppercase tracking-wider text-slate-500">
+                <tr className="text-left text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
 
-                  <th className="px-6 py-4">
-                    Item
+                  <th className="px-5 py-4">
+                    Equipment
                   </th>
 
-                  <th className="px-6 py-4">
+                  <th className="px-5 py-4">
                     Asset Code
                   </th>
 
-                  <th className="px-6 py-4">
+                  <th className="px-5 py-4">
+                    Category
+                  </th>
+
+                  <th className="px-5 py-4">
                     Condition
                   </th>
 
-                  <th className="px-6 py-4">
+                  <th className="px-5 py-4">
                     Status
                   </th>
 
-                  <th className="px-6 py-4">
+                  <th className="px-5 py-4">
                     Actions
                   </th>
 
@@ -546,60 +849,57 @@ function Items() {
 
               <tbody className="divide-y divide-slate-100">
 
-                {items.map(
-                  (item) => (
-
+                {filteredItems.map(
+                  (
+                    item
+                  ) => (
                     <tr
-                      key={item.id}
-                      className={`
-                        transition
-                        hover:bg-slate-50
-
-                        ${
-                          !item.is_active
-                            ? "bg-slate-50/60"
-                            : ""
-                        }
-                      `}
+                      key={
+                        item.id
+                      }
+                      className="transition hover:bg-blue-50/60"
                     >
 
-                      {/* Item */}
-                      <td className="px-6 py-5">
+                      <td className="px-5 py-5">
 
                         <p className="font-bold text-slate-900">
-                          {item.name}
+                          {
+                            item.name
+                          }
                         </p>
 
-                        <p className="mt-1 text-sm text-slate-500">
-                          {item.category ||
-                            "No category"}
+                        <p className="mt-1 max-w-xs truncate text-sm text-slate-500">
+                          {
+                            item.description ||
+                            "No description"
+                          }
                         </p>
 
                       </td>
 
 
-                      {/* Asset Code */}
-                      <td className="px-6 py-5 font-mono text-sm text-slate-700">
-                        {item.asset_code ||
-                          "—"}
+                      <td className="px-5 py-5 font-mono text-sm text-slate-600">
+                        {
+                          item.asset_code ||
+                          "—"
+                        }
                       </td>
 
 
-                      {/* Condition */}
-                      <td className="px-6 py-5">
+                      <td className="px-5 py-5 text-sm font-semibold text-slate-600">
+                        {
+                          item.category ||
+                          "Uncategorized"
+                        }
+                      </td>
+
+
+                      <td className="px-5 py-5">
 
                         <span
-                          className={`
-                            rounded-full
-                            px-3 py-1
-                            text-xs
-                            font-bold
-                            capitalize
-
-                            ${getConditionStyle(
-                              item.condition_status
-                            )}
-                          `}
+                          className={`rounded-full px-3 py-1.5 text-xs font-bold capitalize ${conditionStyle(
+                            item.condition_status
+                          )}`}
                         >
                           {
                             item.condition_status
@@ -609,93 +909,99 @@ function Items() {
                       </td>
 
 
-                      {/* Status */}
-                      <td className="px-6 py-5">
+                      <td className="px-5 py-5">
 
-                        {item.is_active ? (
-                          <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
-                            Active
-                          </span>
-                        ) : (
-                          <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-bold text-slate-600">
-                            Archived
-                          </span>
-                        )}
+                        {
+                          item.is_active
+                            ? (
+                              <span className="rounded-full bg-emerald-100 px-3 py-1.5 text-xs font-bold text-emerald-700">
+                                Active
+                              </span>
+                            )
+                            : (
+                              <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600">
+                                Archived
+                              </span>
+                            )
+                        }
 
                       </td>
 
 
-                      {/* Actions */}
-                      <td className="px-6 py-5">
+                      <td className="px-5 py-5">
 
                         <div className="flex flex-wrap gap-2">
 
-                          {/* View */}
                           <button
-                            onClick={() =>
-                              openView(item)
+                            type="button"
+                            onClick={
+                              () =>
+                                openView(
+                                  item
+                                )
                             }
-                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50"
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
                           >
                             View
                           </button>
 
-
-                          {/* Edit */}
                           <button
-                            onClick={() =>
-                              openEdit(item)
+                            type="button"
+                            onClick={
+                              () =>
+                                openEdit(
+                                  item
+                                )
                             }
                             className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-bold text-white hover:bg-blue-700"
                           >
                             Edit
                           </button>
 
+                          {
+                            item.is_active
+                              ? (
+                                <button
+                                  type="button"
+                                  onClick={
+                                    () =>
+                                      archiveItem(
+                                        item
+                                      )
+                                  }
+                                  className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-bold text-white hover:bg-amber-600"
+                                >
+                                  Archive
+                                </button>
+                              )
+                              : (
+                                <button
+                                  type="button"
+                                  onClick={
+                                    () =>
+                                      restoreItem(
+                                        item
+                                      )
+                                  }
+                                  className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-bold text-white hover:bg-emerald-700"
+                                >
+                                  Restore
+                                </button>
+                              )
+                          }
 
-                          {/* Active */}
-                          {item.is_active ? (
-
-                            <button
-                              onClick={() =>
-                                archiveItem(
+                          <button
+                            type="button"
+                            onClick={
+                              () =>
+                                deleteItem(
                                   item
                                 )
-                              }
-                              className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-bold text-white hover:bg-amber-600"
-                            >
-                              Archive
-                            </button>
-
-                          ) : (
-
-                            <>
-                              {/* Restore */}
-                              <button
-                                onClick={() =>
-                                  restoreItem(
-                                    item
-                                  )
-                                }
-                                className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-bold text-white hover:bg-emerald-700"
-                              >
-                                Restore
-                              </button>
-
-
-                              {/* Permanent Delete */}
-                              <button
-                                onClick={() =>
-                                  deleteItem(
-                                    item
-                                  )
-                                }
-                                className="rounded-lg bg-red-600 px-3 py-2 text-sm font-bold text-white hover:bg-red-700"
-                              >
-                                Delete
-                              </button>
-                            </>
-
-                          )}
+                            }
+                            className="rounded-lg bg-red-600 px-3 py-2 text-sm font-bold text-white hover:bg-red-700"
+                          >
+                            Delete
+                          </button>
 
                         </div>
 
@@ -706,15 +1012,23 @@ function Items() {
                 )}
 
 
-                {items.length === 0 && (
+                {filteredItems.length ===
+                  0 && (
                   <tr>
 
                     <td
-                      colSpan="5"
-                      className="px-6 py-14 text-center text-slate-500"
+                      colSpan="6"
+                      className="px-6 py-14 text-center"
                     >
-                      No equipment has been
-                      created yet.
+
+                      <p className="font-bold text-slate-700">
+                        No equipment matches your search.
+                      </p>
+
+                      <p className="mt-1 text-sm text-slate-500">
+                        Try another name, asset code or category.
+                      </p>
+
                     </td>
 
                   </tr>
@@ -730,58 +1044,241 @@ function Items() {
       </div>
 
 
+      {/* MOBILE CARDS */}
+
+      <div className="space-y-3 md:hidden">
+
+        {
+          loading
+            ? (
+              <Loading />
+            )
+            : filteredItems.map(
+                (
+                  item
+                ) => (
+                  <article
+                    key={
+                      item.id
+                    }
+                    className="rounded-2xl border border-blue-100 bg-white p-4 shadow-sm"
+                  >
+
+                    <div className="flex items-start justify-between gap-3">
+
+                      <div className="min-w-0">
+
+                        <p className="truncate font-black text-slate-900">
+                          {
+                            item.name
+                          }
+                        </p>
+
+                        <p className="mt-1 font-mono text-xs text-blue-600">
+                          {
+                            item.asset_code ||
+                            "No asset code"
+                          }
+                        </p>
+
+                      </div>
+
+
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                          item.is_active
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {
+                          item.is_active
+                            ? "Active"
+                            : "Archived"
+                        }
+                      </span>
+
+                    </div>
+
+
+                    <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+
+                      <MiniInfo
+                        label="Category"
+                        value={
+                          item.category ||
+                          "Uncategorized"
+                        }
+                      />
+
+                      <MiniInfo
+                        label="Condition"
+                        value={
+                          item.condition_status
+                        }
+                      />
+
+                    </div>
+
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+
+                      <button
+                        type="button"
+                        onClick={
+                          () =>
+                            openView(
+                              item
+                            )
+                        }
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-600"
+                      >
+                        View
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={
+                          () =>
+                            openEdit(
+                              item
+                            )
+                        }
+                        className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-bold text-white"
+                      >
+                        Edit
+                      </button>
+
+                      {
+                        item.is_active
+                          ? (
+                            <button
+                              type="button"
+                              onClick={
+                                () =>
+                                  archiveItem(
+                                    item
+                                  )
+                              }
+                              className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-bold text-white"
+                            >
+                              Archive
+                            </button>
+                          )
+                          : (
+                            <button
+                              type="button"
+                              onClick={
+                                () =>
+                                  restoreItem(
+                                    item
+                                  )
+                              }
+                              className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-bold text-white"
+                            >
+                              Restore
+                            </button>
+                          )
+                      }
+
+                    </div>
+
+                  </article>
+                )
+              )
+        }
+
+
+        {!loading &&
+        filteredItems.length ===
+          0 && (
+          <div className="rounded-2xl border border-blue-100 bg-white p-8 text-center shadow-sm">
+
+            <p className="font-bold text-slate-700">
+              No equipment matches your search.
+            </p>
+
+          </div>
+        )}
+
+      </div>
+
+
       {/* =================================================
-          Modal
+          MODAL
           ================================================= */}
 
-      {showModal && (
+      <ModalPortal
+        open={
+          showModal
+        }
+        onClose={
+          closeModal
+        }
+        locked={
+          saving
+        }
+        maxWidth="max-w-2xl"
+      >
 
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 backdrop-blur-sm">
+        {/* HEADER */}
 
-          <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-3xl bg-white p-7 shadow-2xl">
+        <div className="border-b border-blue-100 bg-blue-50 px-5 py-5 sm:px-7">
 
-            {/* Modal Header */}
-            <div className="mb-6 flex items-center justify-between">
+          <div className="flex items-start justify-between gap-4">
 
-              <h2 className="text-2xl font-black text-slate-900">
+            <div>
 
-                {modalMode ===
-                  "create" &&
-                  "Create Equipment"}
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-blue-600">
+                REPAIR ROOM • CMOB DEPARTMENT
+              </p>
 
-                {modalMode ===
-                  "edit" &&
-                  "Edit Equipment"}
+              <h2 className="mt-1 text-2xl font-black text-slate-900">
 
-                {modalMode ===
-                  "view" &&
-                  "Equipment Details"}
+                {
+                  modalMode ===
+                  "create"
+                    ? "Create Equipment"
+                    : modalMode ===
+                        "edit"
+                      ? "Edit Equipment"
+                      : "Equipment Details"
+                }
 
               </h2>
-
-
-              <button
-                type="button"
-                onClick={
-                  closeModal
-                }
-                className="text-3xl text-slate-400 hover:text-slate-700"
-              >
-                ×
-              </button>
 
             </div>
 
 
-            {/* =================================================
-                View Mode
-                ================================================= */}
+            <button
+              type="button"
+              disabled={
+                saving
+              }
+              onClick={
+                closeModal
+              }
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-blue-100 bg-white text-2xl text-slate-400 hover:border-blue-200 hover:text-slate-700"
+            >
+              ×
+            </button>
 
-            {modalMode ===
-              "view" &&
-              selectedItem && (
+          </div>
 
-                <div className="space-y-5">
+        </div>
+
+
+        {/* VIEW */}
+
+        {
+          modalMode ===
+            "view" &&
+          selectedItem && (
+            <>
+
+              <div className="modal-scroll max-h-[calc(100dvh-12rem)] overflow-y-auto p-5 sm:p-7">
+
+                <div className="grid gap-5 rounded-2xl border border-blue-100 bg-slate-50 p-5 sm:grid-cols-2">
 
                   <Detail
                     title="Item Name"
@@ -820,170 +1317,315 @@ function Items() {
                     }
                   />
 
-                  <Detail
-                    title="Description"
-                    value={
-                      selectedItem.description
-                    }
-                  />
+                  <div className="sm:col-span-2">
+
+                    <Detail
+                      title="Description"
+                      value={
+                        selectedItem.description
+                      }
+                    />
+
+                  </div>
 
                 </div>
-              )}
+
+              </div>
 
 
-            {/* =================================================
-                Create / Edit
-                ================================================= */}
-
-            {(modalMode ===
-              "create" ||
-              modalMode ===
-                "edit") && (
-
-              <form
-                onSubmit={
-                  handleSubmit
-                }
-                className="space-y-4"
-              >
-
-                <div>
-                  <label className="mb-2 block text-sm font-bold text-slate-700">
-                    Item Name
-                  </label>
-
-                  <input
-                    type="text"
-                    name="name"
-                    value={
-                      form.name
-                    }
-                    onChange={
-                      handleChange
-                    }
-                    required
-                    placeholder="Example: Epson Projector"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                  />
-                </div>
-
-
-                <div>
-                  <label className="mb-2 block text-sm font-bold text-slate-700">
-                    Category
-                  </label>
-
-                  <input
-                    type="text"
-                    name="category"
-                    value={
-                      form.category
-                    }
-                    onChange={
-                      handleChange
-                    }
-                    placeholder="Example: Projector"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                  />
-                </div>
-
-
-                <div>
-                  <label className="mb-2 block text-sm font-bold text-slate-700">
-                    Asset Code
-                  </label>
-
-                  <input
-                    type="text"
-                    name="asset_code"
-                    value={
-                      form.asset_code
-                    }
-                    onChange={
-                      handleChange
-                    }
-                    placeholder="Example: PROJ-001"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                  />
-                </div>
-
-
-                <div>
-                  <label className="mb-2 block text-sm font-bold text-slate-700">
-                    Condition
-                  </label>
-
-                  <select
-                    name="condition_status"
-                    value={
-                      form.condition_status
-                    }
-                    onChange={
-                      handleChange
-                    }
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none"
-                  >
-                    <option value="good">
-                      Good
-                    </option>
-
-                    <option value="damaged">
-                      Damaged
-                    </option>
-
-                    <option value="maintenance">
-                      Maintenance
-                    </option>
-                  </select>
-                </div>
-
-
-                <div>
-                  <label className="mb-2 block text-sm font-bold text-slate-700">
-                    Description
-                  </label>
-
-                  <textarea
-                    name="description"
-                    value={
-                      form.description
-                    }
-                    onChange={
-                      handleChange
-                    }
-                    rows="4"
-                    placeholder="Equipment description..."
-                    className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
-                  />
-                </div>
-
+              <div className="border-t border-blue-100 bg-white p-5 sm:px-7">
 
                 <button
-                  type="submit"
-                  className="w-full rounded-xl bg-blue-600 px-5 py-3 font-bold text-white hover:bg-blue-700"
+                  type="button"
+                  onClick={
+                    closeModal
+                  }
+                  className="w-full rounded-xl bg-blue-600 px-5 py-3.5 font-bold text-white hover:bg-blue-700"
                 >
-                  {modalMode ===
-                  "create"
-                    ? "Create Equipment"
-                    : "Save Changes"}
+                  Close
                 </button>
 
-              </form>
-            )}
+              </div>
 
-          </div>
+            </>
+          )
+        }
 
-        </div>
-      )}
+
+        {/* CREATE / EDIT */}
+
+        {
+          modalMode !==
+            "view" && (
+            <form
+              onSubmit={
+                handleSubmit
+              }
+              autoComplete="off"
+            >
+
+              {/* Helps reduce unwanted browser/password-manager autofill. */}
+              <input
+                type="text"
+                name="fake_username"
+                autoComplete="username"
+                className="hidden"
+                tabIndex="-1"
+              />
+
+              <input
+                type="password"
+                name="fake_password"
+                autoComplete="new-password"
+                className="hidden"
+                tabIndex="-1"
+              />
+
+
+              <div className="modal-scroll max-h-[calc(100dvh-15rem)] overflow-y-auto p-5 sm:p-7">
+
+                <div className="grid gap-4 sm:grid-cols-2">
+
+                  <Field label="Item Name">
+
+                    <input
+                      type="text"
+                      name="name"
+                      value={
+                        form.name
+                      }
+                      onChange={
+                        handleChange
+                      }
+                      placeholder="Example: Epson Projector"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      required
+                      className={
+                        inputClass
+                      }
+                    />
+
+                  </Field>
+
+
+                  <Field label="Category">
+
+                    <input
+                      type="text"
+                      name="category"
+                      value={
+                        form.category
+                      }
+                      onChange={
+                        handleChange
+                      }
+                      placeholder="Example: Projector"
+                      list="equipment-categories"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      className={
+                        inputClass
+                      }
+                    />
+
+                    <datalist id="equipment-categories">
+
+                      {
+                        categories.map(
+                          (
+                            category
+                          ) => (
+                            <option
+                              key={
+                                category
+                              }
+                              value={
+                                category
+                              }
+                            />
+                          )
+                        )
+                      }
+
+                    </datalist>
+
+                  </Field>
+
+
+                  <Field label="Asset Code">
+
+                    <input
+                      type="text"
+                      name="asset_code"
+                      value={
+                        form.asset_code
+                      }
+                      onChange={
+                        handleChange
+                      }
+                      placeholder="Example: PROJ-001"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      required
+                      className={
+                        inputClass
+                      }
+                    />
+
+                  </Field>
+
+
+                  <Field label="Condition">
+
+                    <select
+                      name="condition_status"
+                      value={
+                        form.condition_status
+                      }
+                      onChange={
+                        handleChange
+                      }
+                      className={
+                        inputClass
+                      }
+                    >
+
+                      <option value="good">
+                        Good
+                      </option>
+
+                      <option value="damaged">
+                        Damaged
+                      </option>
+
+                      <option value="maintenance">
+                        Maintenance
+                      </option>
+
+                    </select>
+
+                  </Field>
+
+
+                  <div className="sm:col-span-2">
+
+                    <Field label="Description">
+
+                      <textarea
+                        name="description"
+                        value={
+                          form.description
+                        }
+                        onChange={
+                          handleChange
+                        }
+                        rows="4"
+                        placeholder="Equipment description..."
+                        autoComplete="off"
+                        data-lpignore="true"
+                        data-1p-ignore="true"
+                        className={`${inputClass} resize-none`}
+                      />
+
+                    </Field>
+
+                  </div>
+
+                </div>
+
+              </div>
+
+
+              <div className="border-t border-blue-100 bg-white p-5 sm:px-7">
+
+                <div className="flex flex-col-reverse gap-3 sm:flex-row">
+
+                  <button
+                    type="button"
+                    disabled={
+                      saving
+                    }
+                    onClick={
+                      closeModal
+                    }
+                    className="flex-1 rounded-xl border border-slate-200 bg-white px-5 py-3.5 font-bold text-slate-600 hover:border-blue-200 hover:bg-blue-50"
+                  >
+                    Cancel
+                  </button>
+
+
+                  <button
+                    type="submit"
+                    disabled={
+                      saving
+                    }
+                    className="flex-1 rounded-xl bg-blue-600 px-5 py-3.5 font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {
+                      saving
+                        ? "Saving..."
+                        : modalMode ===
+                            "create"
+                          ? "Create Equipment"
+                          : "Save Changes"
+                    }
+                  </button>
+
+                </div>
+
+              </div>
+
+            </form>
+          )
+        }
+
+      </ModalPortal>
 
     </div>
   );
 }
 
 
-// =====================================================
-// Detail Component
-// =====================================================
+function Loading() {
+  return (
+    <div className="p-12 text-center">
+
+      <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-blue-100 border-t-blue-600" />
+
+      <p className="mt-4 text-sm font-semibold text-slate-500">
+        Loading equipment...
+      </p>
+
+    </div>
+  );
+}
+
+
+function Field({
+  label,
+  children,
+}) {
+  return (
+    <div>
+
+      <label className="mb-2 block text-sm font-bold text-slate-700">
+        {
+          label
+        }
+      </label>
+
+      {
+        children
+      }
+
+    </div>
+  );
+}
+
 
 function Detail({
   title,
@@ -992,17 +1634,66 @@ function Detail({
   return (
     <div>
 
-      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-        {title}
+      <p className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+        {
+          title
+        }
       </p>
 
-      <p className="mt-1 font-semibold capitalize text-slate-800">
-        {value || "—"}
+      <p className="mt-1 break-words font-semibold capitalize text-slate-800">
+        {
+          value ||
+          "—"
+        }
       </p>
 
     </div>
   );
 }
+
+
+function MiniInfo({
+  label,
+  value,
+}) {
+  return (
+    <div>
+
+      <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+        {
+          label
+        }
+      </p>
+
+      <p className="mt-1 capitalize font-semibold text-slate-700">
+        {
+          value ||
+          "—"
+        }
+      </p>
+
+    </div>
+  );
+}
+
+
+const inputClass = `
+  w-full
+  rounded-xl
+  border
+  border-slate-200
+  bg-slate-50
+  px-4
+  py-3
+  text-slate-900
+  outline-none
+  transition
+  placeholder:text-slate-400
+  focus:border-blue-500
+  focus:bg-white
+  focus:ring-4
+  focus:ring-blue-100
+`;
 
 
 export default Items;

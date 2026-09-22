@@ -1,313 +1,438 @@
 // =====================================================
 // Staff Panel Controller
-// Dashboard, requests, borrowed items, and records
+// Dashboard, requests, borrowed items, records,
+// School ID deposit, release, and return workflow
 // =====================================================
 
 const database = require("../config/database");
 
-// Reusable query part for equipment names
+
+// =====================================================
+// Reusable Equipment Names Query
+// =====================================================
+
 const itemNamesQuery = `
   (
     SELECT GROUP_CONCAT(
       CONCAT(
         i.name,
+
         CASE
           WHEN i.asset_code IS NOT NULL
-          THEN CONCAT(' (', i.asset_code, ')')
+          THEN CONCAT(
+            ' (',
+            i.asset_code,
+            ')'
+          )
           ELSE ''
         END
       )
+
       ORDER BY i.name
       SEPARATOR ', '
     )
+
     FROM reservation_items ri
+
     JOIN items i
       ON i.id = ri.item_id
+
     WHERE ri.reservation_id = r.id
   )
 `;
 
 
 // =====================================================
+// Emit Reservation Update
+// =====================================================
+
+const emitReservationUpdate = (
+  req,
+  reservationId,
+  payload = {}
+) => {
+  const io =
+    req.app.get("io");
+
+  if (!io) {
+    return;
+  }
+
+  io.emit(
+    "reservation_updated",
+    {
+      id:
+        Number(
+          reservationId
+        ),
+
+      ...payload,
+    }
+  );
+};
+
+
+// =====================================================
 // DASHBOARD
 // =====================================================
 
-const getDashboard = async (
-  req,
-  res
-) => {
-  try {
-    const [counts] =
-      await database.query(`
-        SELECT
-          (
-            SELECT COUNT(*)
-            FROM reservations
-            WHERE status = 'pending'
-          ) AS pending,
+const getDashboard =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const [counts] =
+        await database.query(`
+          SELECT
 
-          (
-            SELECT COUNT(*)
-            FROM reservations
-            WHERE status = 'approved'
-          ) AS approved,
+            (
+              SELECT COUNT(*)
+              FROM reservations
+              WHERE status = 'pending'
+            ) AS pending,
 
-          (
-            SELECT COUNT(*)
-            FROM reservations
-            WHERE status = 'released'
-          ) AS borrowed,
+            (
+              SELECT COUNT(*)
+              FROM reservations
+              WHERE status = 'approved'
+            ) AS approved,
 
-          (
-            SELECT COUNT(*)
-            FROM reservations
-            WHERE status = 'released'
-              AND end_date < CURDATE()
-          ) AS overdue,
+            (
+              SELECT COUNT(*)
+              FROM reservations
+              WHERE status = 'released'
+            ) AS borrowed,
 
-          (
-            SELECT COUNT(*)
-            FROM items
-            WHERE is_active = TRUE
-          ) AS equipment
-      `);
+            (
+              SELECT COUNT(*)
+              FROM reservations
+              WHERE status = 'released'
 
-    const [recent] =
-      await database.query(`
-        SELECT
-          r.id,
-          r.reference_code,
-          r.requester_name,
-          r.department,
-          r.start_date,
-          r.status,
-          ${itemNamesQuery} AS items
-        FROM reservations r
-        ORDER BY r.created_at DESC
-        LIMIT 6
-      `);
+                AND TIMESTAMP(
+                  end_date,
+                  COALESCE(
+                    end_time,
+                    '23:59:59'
+                  )
+                ) < NOW()
+            ) AS overdue,
 
-    res.json({
-      success: true,
-      ...counts[0],
-      recent,
-    });
-  } catch (error) {
-    console.error(
-      "Dashboard error:",
-      error.message
-    );
+            (
+              SELECT COUNT(*)
+              FROM items
+              WHERE is_active = TRUE
+            ) AS equipment
+        `);
 
-    res.status(500).json({
-      success: false,
-      message:
-        "Could not load dashboard.",
-    });
-  }
-};
+
+      const [recent] =
+        await database.query(`
+          SELECT
+            r.id,
+            r.reference_code,
+            r.requester_name,
+            r.department,
+            r.start_date,
+            r.start_time,
+            r.end_date,
+            r.end_time,
+            r.status,
+
+            ${itemNamesQuery}
+              AS items
+
+          FROM reservations r
+
+          ORDER BY
+            r.created_at DESC
+
+          LIMIT 6
+        `);
+
+
+      res.json({
+        success: true,
+
+        ...counts[0],
+
+        recent,
+      });
+    } catch (error) {
+      console.error(
+        "Dashboard error:",
+        error.message
+      );
+
+
+      res.status(500).json({
+        success: false,
+
+        message:
+          "Could not load dashboard.",
+      });
+    }
+  };
 
 
 // =====================================================
 // ACTIVE REQUESTS
-// Pending -> Approved -> Finalized
 // =====================================================
 
-const getRequests = async (
-  req,
-  res
-) => {
-  try {
-    const [requests] =
-      await database.query(`
-        SELECT
-          r.*,
-          ${itemNamesQuery} AS items
-        FROM reservations r
-        WHERE r.status IN (
-          'pending',
-          'approved',
-          'finalized'
-        )
-        ORDER BY r.created_at DESC
-      `);
+const getRequests =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const [requests] =
+        await database.query(`
+          SELECT
+            r.*,
 
-    res.json({
-      success: true,
-      requests,
-    });
-  } catch (error) {
-    console.error(
-      "Requests error:",
-      error.message
-    );
+            ${itemNamesQuery}
+              AS items
 
-    res.status(500).json({
-      success: false,
-      message:
-        "Could not load requests.",
-    });
-  }
-};
+          FROM reservations r
+
+          WHERE r.status IN (
+            'pending',
+            'approved',
+            'finalized'
+          )
+
+          ORDER BY
+            r.created_at DESC
+        `);
+
+
+      res.json({
+        success: true,
+        requests,
+      });
+    } catch (error) {
+      console.error(
+        "Requests error:",
+        error.message
+      );
+
+
+      res.status(500).json({
+        success: false,
+
+        message:
+          "Could not load requests.",
+      });
+    }
+  };
 
 
 // =====================================================
 // BORROWED ITEMS
 // =====================================================
 
-const getBorrowed = async (
-  req,
-  res
-) => {
-  try {
-    const [borrowed] =
-      await database.query(`
-        SELECT
-          r.*,
-          ${itemNamesQuery} AS items,
+const getBorrowed =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const [borrowed] =
+        await database.query(`
+          SELECT
+            r.*,
 
-          CASE
-            WHEN r.end_date < CURDATE()
-            THEN TRUE
-            ELSE FALSE
-          END AS is_overdue
+            ${itemNamesQuery}
+              AS items,
 
-        FROM reservations r
+            CASE
+              WHEN TIMESTAMP(
+                r.end_date,
+                COALESCE(
+                  r.end_time,
+                  '23:59:59'
+                )
+              ) < NOW()
+              THEN TRUE
+              ELSE FALSE
+            END AS is_overdue
 
-        WHERE r.status = 'released'
+          FROM reservations r
 
-        ORDER BY
-          is_overdue DESC,
-          r.end_date ASC
-      `);
+          WHERE r.status = 'released'
 
-    res.json({
-      success: true,
-      borrowed,
-    });
-  } catch (error) {
-    console.error(
-      "Borrowed error:",
-      error.message
-    );
+          ORDER BY
+            is_overdue DESC,
+            r.end_date ASC,
+            r.end_time ASC
+        `);
 
-    res.status(500).json({
-      success: false,
-      message:
-        "Could not load borrowed items.",
-    });
-  }
-};
+
+      res.json({
+        success: true,
+        borrowed,
+      });
+    } catch (error) {
+      console.error(
+        "Borrowed error:",
+        error.message
+      );
+
+
+      res.status(500).json({
+        success: false,
+
+        message:
+          "Could not load borrowed items.",
+      });
+    }
+  };
 
 
 // =====================================================
 // RECORDS
 // =====================================================
 
-const getRecords = async (
-  req,
-  res
-) => {
-  try {
-    const {
-      from,
-      to,
-      department,
-      status,
-    } = req.query;
+const getRecords =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const {
+        from,
+        to,
+        department,
+        status,
+      } = req.query;
 
-    const conditions = [];
-    const values = [];
 
-    if (from) {
-      conditions.push(
-        "r.start_date >= ?"
+      const conditions = [];
+      const values = [];
+
+
+      if (from) {
+        conditions.push(
+          "r.start_date >= ?"
+        );
+
+        values.push(
+          from
+        );
+      }
+
+
+      if (to) {
+        conditions.push(
+          "r.start_date <= ?"
+        );
+
+        values.push(
+          to
+        );
+      }
+
+
+      if (department) {
+        conditions.push(
+          "r.department LIKE ?"
+        );
+
+        values.push(
+          `%${department}%`
+        );
+      }
+
+
+      if (status) {
+        conditions.push(
+          "r.status = ?"
+        );
+
+        values.push(
+          status
+        );
+      }
+
+
+      const where =
+        conditions.length > 0
+          ? `WHERE ${conditions.join(
+              " AND "
+            )}`
+          : "";
+
+
+      const [records] =
+        await database.query(
+          `
+          SELECT
+            r.*,
+
+            ${itemNamesQuery}
+              AS items
+
+          FROM reservations r
+
+          ${where}
+
+          ORDER BY
+            r.created_at DESC
+          `,
+          values
+        );
+
+
+      res.json({
+        success: true,
+        records,
+      });
+    } catch (error) {
+      console.error(
+        "Records error:",
+        error.message
       );
 
-      values.push(from);
+
+      res.status(500).json({
+        success: false,
+
+        message:
+          "Could not load records.",
+      });
     }
-
-    if (to) {
-      conditions.push(
-        "r.start_date <= ?"
-      );
-
-      values.push(to);
-    }
-
-    if (department) {
-      conditions.push(
-        "r.department LIKE ?"
-      );
-
-      values.push(
-        `%${department}%`
-      );
-    }
-
-    if (status) {
-      conditions.push(
-        "r.status = ?"
-      );
-
-      values.push(status);
-    }
-
-    const where =
-      conditions.length > 0
-        ? `WHERE ${conditions.join(
-            " AND "
-          )}`
-        : "";
-
-    const [records] =
-      await database.query(
-        `
-        SELECT
-          r.*,
-          ${itemNamesQuery} AS items
-        FROM reservations r
-        ${where}
-        ORDER BY r.created_at DESC
-        `,
-        values
-      );
-
-    res.json({
-      success: true,
-      records,
-    });
-  } catch (error) {
-    console.error(
-      "Records error:",
-      error.message
-    );
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Could not load records.",
-    });
-  }
-};
+  };
 
 
 // =====================================================
 // UPDATE RESERVATION STATUS
+//
+// pending -> approved/rejected/cancelled
+// approved -> finalized/cancelled
+// finalized -> released/cancelled
+//
+// returned is handled by completeReturn()
 // =====================================================
 
 const updateReservationStatus =
-  async (req, res) => {
+  async (
+    req,
+    res
+  ) => {
     const connection =
       await database.getConnection();
+
 
     try {
       const reservationId =
         req.params.id;
 
+
       const {
         status,
         message,
       } = req.body;
+
 
       const allowedTransitions = {
         pending: [
@@ -325,13 +450,11 @@ const updateReservationStatus =
           "released",
           "cancelled",
         ],
-
-        released: [
-          "returned",
-        ],
       };
 
+
       await connection.beginTransaction();
+
 
       const [rows] =
         await connection.query(
@@ -341,56 +464,110 @@ const updateReservationStatus =
           WHERE id = ?
           FOR UPDATE
           `,
-          [reservationId]
+          [
+            reservationId,
+          ]
         );
 
-      if (rows.length === 0) {
+
+      if (
+        rows.length ===
+        0
+      ) {
         await connection.rollback();
 
-        return res.status(404).json({
-          success: false,
-          message:
-            "Reservation not found.",
-        });
+
+        return res
+          .status(404)
+          .json({
+            success: false,
+
+            message:
+              "Reservation not found.",
+          });
       }
 
-      const reservation = rows[0];
+
+      const reservation =
+        rows[0];
+
 
       const permitted =
         allowedTransitions[
           reservation.status
         ] || [];
 
+
       if (
-        !permitted.includes(status)
+        !permitted.includes(
+          status
+        )
       ) {
         await connection.rollback();
 
-        return res.status(400).json({
-          success: false,
-          message: `Cannot change ${reservation.status} to ${status}.`,
-        });
+
+        return res
+          .status(400)
+          .json({
+            success: false,
+
+            message:
+              `Cannot change ${reservation.status} to ${status}.`,
+          });
       }
+
+
+      // ===============================================
+      // ID must be deposited before release
+      // ===============================================
+
+      if (
+        status ===
+          "released" &&
+        !reservation.id_deposited
+      ) {
+        await connection.rollback();
+
+
+        return res
+          .status(400)
+          .json({
+            success: false,
+
+            message:
+              "Confirm that the borrower deposited their School ID before releasing the equipment.",
+          });
+      }
+
 
       const updates = [
         "status = ?",
       ];
 
-      const values = [status];
+      const values = [
+        status,
+      ];
+
 
       if (
-        message !== undefined
+        message !==
+        undefined
       ) {
         updates.push(
           "staff_message = ?"
         );
 
         values.push(
-          message || null
+          message ||
+          null
         );
       }
 
-      if (status === "approved") {
+
+      if (
+        status ===
+        "approved"
+      ) {
         updates.push(
           "approved_by = ?",
           "approved_at = NOW()"
@@ -401,7 +578,11 @@ const updateReservationStatus =
         );
       }
 
-      if (status === "finalized") {
+
+      if (
+        status ===
+        "finalized"
+      ) {
         updates.push(
           "finalized_by = ?",
           "finalized_at = NOW()"
@@ -412,30 +593,36 @@ const updateReservationStatus =
         );
       }
 
-      if (status === "released") {
+
+      if (
+        status ===
+        "released"
+      ) {
         updates.push(
           "released_at = NOW()"
         );
       }
 
-      if (status === "returned") {
-        updates.push(
-          "returned_at = NOW()"
-        );
-      }
 
       values.push(
         reservationId
       );
 
+
       await connection.query(
         `
         UPDATE reservations
-        SET ${updates.join(", ")}
+
+        SET
+          ${updates.join(
+            ", "
+          )}
+
         WHERE id = ?
         `,
         values
       );
+
 
       await connection.query(
         `
@@ -446,48 +633,57 @@ const updateReservationStatus =
           note,
           changed_by
         )
+
         VALUES (?, ?, ?, ?)
         `,
         [
           reservationId,
+
           status,
-          message || null,
+
+          message ||
+            null,
+
           req.staff.id,
         ]
       );
 
+
       await connection.commit();
 
-      const io =
-        req.app.get("io");
 
-      if (io) {
-        io.emit(
-          "reservation_updated",
-          {
-            id: Number(
-              reservationId
-            ),
-            status,
-          }
-        );
-      }
+      emitReservationUpdate(
+        req,
+        reservationId,
+        {
+          status,
+        }
+      );
+
 
       res.json({
         success: true,
+
         message:
           "Reservation updated successfully.",
       });
     } catch (error) {
-      await connection.rollback();
+      try {
+        await connection.rollback();
+      } catch {
+        // Ignore rollback failure
+      }
+
 
       console.error(
         "Status update error:",
         error.message
       );
 
+
       res.status(500).json({
         success: false,
+
         message:
           "Could not update reservation.",
       });
@@ -496,10 +692,391 @@ const updateReservationStatus =
     }
   };
 
+
+// =====================================================
+// CONFIRM SCHOOL ID DEPOSIT
+//
+// Only available after physical form has been signed.
+// =====================================================
+
+const confirmIdDeposit =
+  async (
+    req,
+    res
+  ) => {
+    const connection =
+      await database.getConnection();
+
+
+    try {
+      const reservationId =
+        req.params.id;
+
+
+      await connection.beginTransaction();
+
+
+      const [rows] =
+        await connection.query(
+          `
+          SELECT *
+          FROM reservations
+          WHERE id = ?
+          FOR UPDATE
+          `,
+          [
+            reservationId,
+          ]
+        );
+
+
+      if (
+        rows.length ===
+        0
+      ) {
+        await connection.rollback();
+
+
+        return res
+          .status(404)
+          .json({
+            success: false,
+
+            message:
+              "Reservation not found.",
+          });
+      }
+
+
+      const reservation =
+        rows[0];
+
+
+      if (
+        reservation.status !==
+        "finalized"
+      ) {
+        await connection.rollback();
+
+
+        return res
+          .status(400)
+          .json({
+            success: false,
+
+            message:
+              "The physical form must be completed before accepting the School ID.",
+          });
+      }
+
+
+      if (
+        reservation.id_deposited
+      ) {
+        await connection.rollback();
+
+
+        return res.json({
+          success: true,
+
+          message:
+            "School ID deposit is already confirmed.",
+        });
+      }
+
+
+      await connection.query(
+        `
+        UPDATE reservations
+
+        SET
+          id_deposited = TRUE,
+          id_deposited_at = NOW()
+
+        WHERE id = ?
+        `,
+        [
+          reservationId,
+        ]
+      );
+
+
+      await connection.commit();
+
+
+      emitReservationUpdate(
+        req,
+        reservationId,
+        {
+          status:
+            reservation.status,
+
+          id_deposited:
+            true,
+        }
+      );
+
+
+      res.json({
+        success: true,
+
+        message:
+          "School ID deposit confirmed. Equipment can now be released.",
+      });
+    } catch (error) {
+      try {
+        await connection.rollback();
+      } catch {
+        // Ignore rollback failure
+      }
+
+
+      console.error(
+        "ID deposit error:",
+        error.message
+      );
+
+
+      res.status(500).json({
+        success: false,
+
+        message:
+          "Could not confirm School ID deposit.",
+      });
+    } finally {
+      connection.release();
+    }
+  };
+
+
+// =====================================================
+// COMPLETE RETURN
+//
+// Requires:
+// 1. Equipment physically returned
+// 2. School ID returned to borrower
+// =====================================================
+
+const completeReturn =
+  async (
+    req,
+    res
+  ) => {
+    const connection =
+      await database.getConnection();
+
+
+    try {
+      const reservationId =
+        req.params.id;
+
+
+      const {
+        equipment_returned,
+        id_returned,
+        message,
+      } = req.body;
+
+
+      if (
+        !equipment_returned ||
+        !id_returned
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+
+            message:
+              "Confirm both the equipment return and the School ID return.",
+          });
+      }
+
+
+      await connection.beginTransaction();
+
+
+      const [rows] =
+        await connection.query(
+          `
+          SELECT *
+          FROM reservations
+          WHERE id = ?
+          FOR UPDATE
+          `,
+          [
+            reservationId,
+          ]
+        );
+
+
+      if (
+        rows.length ===
+        0
+      ) {
+        await connection.rollback();
+
+
+        return res
+          .status(404)
+          .json({
+            success: false,
+
+            message:
+              "Reservation not found.",
+          });
+      }
+
+
+      const reservation =
+        rows[0];
+
+
+      if (
+        reservation.status !==
+        "released"
+      ) {
+        await connection.rollback();
+
+
+        return res
+          .status(400)
+          .json({
+            success: false,
+
+            message:
+              "Only released equipment can be returned.",
+          });
+      }
+
+
+      if (
+        !reservation.id_deposited
+      ) {
+        await connection.rollback();
+
+
+        return res
+          .status(400)
+          .json({
+            success: false,
+
+            message:
+              "This reservation has no confirmed School ID deposit.",
+          });
+      }
+
+
+      const finalMessage =
+        message?.trim() ||
+        "Equipment and School ID have been returned successfully.";
+
+
+      await connection.query(
+        `
+        UPDATE reservations
+
+        SET
+          status = 'returned',
+
+          returned_at = NOW(),
+
+          id_returned = TRUE,
+
+          id_returned_at = NOW(),
+
+          staff_message = ?
+
+        WHERE id = ?
+        `,
+        [
+          finalMessage,
+          reservationId,
+        ]
+      );
+
+
+      await connection.query(
+        `
+        INSERT INTO status_history
+        (
+          reservation_id,
+          status,
+          note,
+          changed_by
+        )
+
+        VALUES (
+          ?,
+          'returned',
+          ?,
+          ?
+        )
+        `,
+        [
+          reservationId,
+
+          finalMessage,
+
+          req.staff.id,
+        ]
+      );
+
+
+      await connection.commit();
+
+
+      emitReservationUpdate(
+        req,
+        reservationId,
+        {
+          status:
+            "returned",
+
+          id_returned:
+            true,
+        }
+      );
+
+
+      res.json({
+        success: true,
+
+        message:
+          "Return completed. Equipment is available again and the School ID was returned.",
+      });
+    } catch (error) {
+      try {
+        await connection.rollback();
+      } catch {
+        // Ignore rollback failure
+      }
+
+
+      console.error(
+        "Complete return error:",
+        error.message
+      );
+
+
+      res.status(500).json({
+        success: false,
+
+        message:
+          "Could not complete the return.",
+      });
+    } finally {
+      connection.release();
+    }
+  };
+
+
 module.exports = {
   getDashboard,
   getRequests,
   getBorrowed,
   getRecords,
   updateReservationStatus,
+  confirmIdDeposit,
+  completeReturn,
 };

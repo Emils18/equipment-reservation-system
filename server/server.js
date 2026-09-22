@@ -3,19 +3,31 @@
 // Main Backend Server
 // =====================================================
 
-const express = require("express");
-const cors = require("cors");
-const http = require("http");
+const express =
+  require("express");
+
+const cors =
+  require("cors");
+
+const http =
+  require("http");
 
 const {
   Server,
 } = require("socket.io");
 
+
 require("dotenv").config();
+
 
 const database = require(
   "./config/database"
 );
+
+
+// =====================================================
+// Routes
+// =====================================================
 
 const itemRoutes = require(
   "./routes/itemRoutes"
@@ -29,12 +41,17 @@ const staffRoutes = require(
   "./routes/staffRoutes"
 );
 
+const reservationRoutes = require(
+  "./routes/reservationRoutes"
+);
+
 
 // =====================================================
-// Create Server
+// Create Express + HTTP Server
 // =====================================================
 
-const app = express();
+const app =
+  express();
 
 const httpServer =
   http.createServer(app);
@@ -44,20 +61,22 @@ const httpServer =
 // Real-Time Socket Server
 // =====================================================
 
-const io = new Server(
-  httpServer,
-  {
-    cors: {
-      origin:
-        process.env.CLIENT_URL ||
-        "http://localhost:5173",
+const io =
+  new Server(
+    httpServer,
+    {
+      cors: {
+        origin:
+          process.env.CLIENT_URL ||
+          "http://localhost:5173",
 
-      credentials: true,
-    },
-  }
-);
+        credentials: true,
+      },
+    }
+  );
 
-// Allows controllers to use Socket.IO
+
+// Makes Socket.IO available inside controllers
 app.set("io", io);
 
 
@@ -75,26 +94,41 @@ app.use(
   })
 );
 
-app.use(express.json());
+
+app.use(
+  express.json()
+);
 
 
 // =====================================================
 // API Routes
 // =====================================================
 
+// Staff authentication
 app.use(
   "/api/auth",
   authRoutes
 );
 
+
+// Staff/Admin Panel
 app.use(
   "/api/staff",
   staffRoutes
 );
 
+
+// Equipment management
 app.use(
   "/api/items",
   itemRoutes
+);
+
+
+// Public borrower reservations
+app.use(
+  "/api/reservations",
+  reservationRoutes
 );
 
 
@@ -102,13 +136,17 @@ app.use(
 // Server Test
 // =====================================================
 
-app.get("/", (req, res) => {
-  res.json({
-    success: true,
-    message:
-      "Equipment Reservation System API is running.",
-  });
-});
+app.get(
+  "/",
+  (req, res) => {
+    res.json({
+      success: true,
+
+      message:
+        "Equipment Reservation System API is running.",
+    });
+  }
+);
 
 
 // =====================================================
@@ -117,26 +155,42 @@ app.get("/", (req, res) => {
 
 app.get(
   "/api/test-db",
+
   async (req, res) => {
     try {
       const [rows] =
         await database.query(
-          "SELECT DATABASE() AS database_name"
+          `
+          SELECT
+            DATABASE() AS database_name
+          `
         );
+
 
       res.json({
         success: true,
+
         message:
           "Database connected successfully.",
+
         database:
           rows[0].database_name,
       });
     } catch (error) {
+      console.error(
+        "Database connection error:",
+        error.message
+      );
+
+
       res.status(500).json({
         success: false,
+
         message:
           "Database connection failed.",
-        error: error.message,
+
+        error:
+          error.message,
       });
     }
   }
@@ -149,14 +203,17 @@ app.get(
 
 io.on(
   "connection",
+
   (socket) => {
     console.log(
       "Browser connected:",
       socket.id
     );
 
+
     socket.on(
       "disconnect",
+
       () => {
         console.log(
           "Browser disconnected:",
@@ -173,12 +230,16 @@ io.on(
 // =====================================================
 
 const PORT =
-  process.env.PORT || 5000;
+  process.env.PORT ||
+  5000;
+
 
 httpServer.listen(
   PORT,
+
   () => {
     console.log("");
+
     console.log(
       "=========================================="
     );
@@ -197,6 +258,10 @@ httpServer.listen(
 
     console.log(
       ` DB Test: http://localhost:${PORT}/api/test-db`
+    );
+
+    console.log(
+      ` Borrower API: http://localhost:${PORT}/api/reservations/catalog`
     );
 
     console.log(

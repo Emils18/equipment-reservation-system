@@ -1,18 +1,39 @@
 // =====================================================
-// Main Application Routes
+// REPAIR ROOM - MAIN APPLICATION
+// CMOB Department
 // =====================================================
+//
+// LIGHT THEME ONLY.
+//
+// This file:
+// - controls Client + Staff routes
+// - controls browser tab names
+// - removes any old saved dark-theme setting
+//
+// =====================================================
+
+import {
+  useEffect,
+} from "react";
 
 import {
   Navigate,
   Route,
   Routes,
+  useLocation,
 } from "react-router-dom";
 
 import ProtectedStaff from "./components/ProtectedStaff";
 import StaffLayout from "./components/StaffLayout";
 
+
+// Borrower Pages
+import Borrow from "./pages/borrower/Borrow";
+import Track from "./pages/borrower/Track";
+
+
+// Staff Pages
 import Login from "./pages/staff/Login";
-import Register from "./pages/staff/Register";
 import Dashboard from "./pages/staff/Dashboard";
 import Requests from "./pages/staff/Requests";
 import Borrowed from "./pages/staff/Borrowed";
@@ -20,35 +41,121 @@ import Items from "./pages/staff/Items";
 import Records from "./pages/staff/Records";
 import Settings from "./pages/staff/Settings";
 
+
 function App() {
+  const location =
+    useLocation();
+
+
+  // ===================================================
+  // FORCE LIGHT MODE ONLY
+  // ===================================================
+  //
+  // Removes the old Dark/Light system completely.
+  //
+  // colorScheme = "light" also keeps native browser
+  // date/time/calendar icons visible correctly.
+  //
+  useEffect(() => {
+    document.documentElement.removeAttribute(
+      "data-theme"
+    );
+
+    document.documentElement.style.colorScheme =
+      "light";
+
+    try {
+      localStorage.removeItem(
+        "repair_room_theme"
+      );
+    } catch {
+      // Ignore localStorage error.
+    }
+  }, []);
+
+
+  // ===================================================
+  // BROWSER TAB TITLE
+  // ===================================================
+
+  useEffect(() => {
+    if (
+      location.pathname.startsWith(
+        "/staff"
+      )
+    ) {
+      document.title =
+        "Staff | Repair Room";
+    } else {
+      document.title =
+        "Client | Repair Room";
+    }
+  }, [
+    location.pathname,
+  ]);
+
+
   return (
     <Routes>
-      {/* Temporary default while we finish Staff Panel */}
+
+      {/* ===============================================
+          CLIENT / BORROWER
+          =============================================== */}
+
       <Route
         path="/"
-        element={<Navigate to="/staff/login" replace />}
+        element={
+          <Navigate
+            to="/borrow"
+            replace
+          />
+        }
       />
 
-      {/* Staff Authentication */}
+
+      <Route
+        path="/borrow"
+        element={
+          <Borrow />
+        }
+      />
+
+
+      <Route
+        path="/track"
+        element={
+          <Track />
+        }
+      />
+
+
+      {/* ===============================================
+          STAFF LOGIN
+          =============================================== */}
+
       <Route
         path="/staff/login"
-        element={<Login />}
+        element={
+          <Login />
+        }
       />
 
-      <Route
-        path="/staff/register"
-        element={<Register />}
-      />
 
-      {/* Protected Staff Panel */}
+      {/* ===============================================
+          STAFF PANEL
+          =============================================== */}
+
       <Route
         path="/staff"
         element={
           <ProtectedStaff>
+
             <StaffLayout />
+
           </ProtectedStaff>
         }
       >
+
         <Route
           index
           element={
@@ -59,38 +166,74 @@ function App() {
           }
         />
 
+
         <Route
           path="dashboard"
-          element={<Dashboard />}
+          element={
+            <Dashboard />
+          }
         />
+
 
         <Route
           path="requests"
-          element={<Requests />}
+          element={
+            <Requests />
+          }
         />
+
 
         <Route
           path="borrowed"
-          element={<Borrowed />}
+          element={
+            <Borrowed />
+          }
         />
+
 
         <Route
           path="items"
-          element={<Items />}
+          element={
+            <Items />
+          }
         />
+
 
         <Route
           path="records"
-          element={<Records />}
+          element={
+            <Records />
+          }
         />
+
 
         <Route
           path="settings"
-          element={<Settings />}
+          element={
+            <Settings />
+          }
         />
+
       </Route>
+
+
+      {/* ===============================================
+          UNKNOWN URL
+          =============================================== */}
+
+      <Route
+        path="*"
+        element={
+          <Navigate
+            to="/borrow"
+            replace
+          />
+        }
+      />
+
     </Routes>
   );
 }
+
 
 export default App;

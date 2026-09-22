@@ -1,9 +1,43 @@
 // =====================================================
 // Item Controller
 // Create, view, edit, archive, restore, and delete items
+//
+// Every equipment change emits "equipment_updated"
+// so borrower pages update without refreshing.
 // =====================================================
 
-const database = require("../config/database");
+const database = require(
+  "../config/database"
+);
+
+
+// =====================================================
+// REAL-TIME HELPER
+// =====================================================
+
+const emitEquipmentUpdated = (
+  req,
+  itemId,
+  action
+) => {
+  const io =
+    req.app.get("io");
+
+  if (!io) {
+    return;
+  }
+
+  io.emit(
+    "equipment_updated",
+    {
+      id: Number(
+        itemId
+      ),
+
+      action,
+    }
+  );
+};
 
 
 // =====================================================
@@ -11,410 +45,610 @@ const database = require("../config/database");
 // Staff Panel
 // =====================================================
 
-const getAllItems = async (req, res) => {
-  try {
-    const [items] = await database.query(`
-      SELECT *
-      FROM items
-      ORDER BY is_active DESC, created_at DESC
-    `);
+const getAllItems =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const [items] =
+        await database.query(`
+          SELECT *
+          FROM items
+          ORDER BY
+            is_active DESC,
+            created_at DESC
+        `);
 
-    res.json({
-      success: true,
-      items,
-    });
-  } catch (error) {
-    console.error(
-      "Get items error:",
-      error.message
-    );
+      res.json({
+        success: true,
+        items,
+      });
+    } catch (error) {
+      console.error(
+        "Get items error:",
+        error.message
+      );
 
-    res.status(500).json({
-      success: false,
-      message: "Could not load equipment.",
-    });
-  }
-};
+      res.status(
+        500
+      ).json({
+        success: false,
+
+        message:
+          "Could not load equipment.",
+      });
+    }
+  };
 
 
 // =====================================================
 // GET ACTIVE ITEMS
 // Borrower Side
-//
-// Only active items are shown to borrowers.
-// Archived items are hidden.
 // =====================================================
 
-const getActiveItems = async (req, res) => {
-  try {
-    const [items] = await database.query(`
-      SELECT *
-      FROM items
-      WHERE is_active = TRUE
-      ORDER BY name ASC
-    `);
+const getActiveItems =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const [items] =
+        await database.query(`
+          SELECT *
+          FROM items
+          WHERE is_active = TRUE
+          ORDER BY name ASC
+        `);
 
-    res.json({
-      success: true,
-      items,
-    });
-  } catch (error) {
-    console.error(
-      "Get active items error:",
-      error.message
-    );
+      res.json({
+        success: true,
+        items,
+      });
+    } catch (error) {
+      console.error(
+        "Get active items error:",
+        error.message
+      );
 
-    res.status(500).json({
-      success: false,
-      message:
-        "Could not load available equipment.",
-    });
-  }
-};
+      res.status(
+        500
+      ).json({
+        success: false,
+
+        message:
+          "Could not load available equipment.",
+      });
+    }
+  };
 
 
 // =====================================================
 // ADD ITEM
 // =====================================================
 
-const addItem = async (req, res) => {
-  try {
-    const {
-      name,
-      category,
-      asset_code,
-      description,
-      condition_status,
-    } = req.body;
-
-    if (!name || name.trim() === "") {
-      return res.status(400).json({
-        success: false,
-        message: "Item name is required.",
-      });
-    }
-
-    const [result] = await database.query(
-      `
-      INSERT INTO items
-      (
+const addItem =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const {
         name,
         category,
         asset_code,
         description,
-        condition_status
-      )
-      VALUES (?, ?, ?, ?, ?)
-      `,
-      [
-        name.trim(),
+        condition_status,
+      } = req.body;
 
-        category?.trim() || null,
 
-        asset_code?.trim() || null,
+      if (
+        !name ||
+        name.trim() ===
+          ""
+      ) {
+        return res
+          .status(400)
+          .json({
+            success:
+              false,
 
-        description?.trim() || null,
+            message:
+              "Item name is required.",
+          });
+      }
 
-        condition_status || "good",
-      ]
-    );
 
-    res.status(201).json({
-      success: true,
-      message:
-        "Equipment created successfully.",
-      item_id: result.insertId,
-    });
-  } catch (error) {
-    console.error(
-      "Add item error:",
-      error.message
-    );
+      const [result] =
+        await database.query(
+          `
+          INSERT INTO items
+          (
+            name,
+            category,
+            asset_code,
+            description,
+            condition_status
+          )
+          VALUES (?, ?, ?, ?, ?)
+          `,
+          [
+            name.trim(),
 
-    if (error.code === "ER_DUP_ENTRY") {
-      return res.status(409).json({
-        success: false,
+            category?.trim() ||
+              null,
+
+            asset_code?.trim() ||
+              null,
+
+            description?.trim() ||
+              null,
+
+            condition_status ||
+              "good",
+          ]
+        );
+
+
+      emitEquipmentUpdated(
+        req,
+        result.insertId,
+        "created"
+      );
+
+
+      res.status(
+        201
+      ).json({
+        success: true,
+
         message:
-          "That asset code is already being used.",
+          "Equipment created successfully.",
+
+        item_id:
+          result.insertId,
+      });
+    } catch (error) {
+      console.error(
+        "Add item error:",
+        error.message
+      );
+
+
+      if (
+        error.code ===
+        "ER_DUP_ENTRY"
+      ) {
+        return res
+          .status(409)
+          .json({
+            success:
+              false,
+
+            message:
+              "That asset code is already being used.",
+          });
+      }
+
+
+      res.status(
+        500
+      ).json({
+        success: false,
+
+        message:
+          "Could not create equipment.",
       });
     }
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Could not create equipment.",
-    });
-  }
-};
+  };
 
 
 // =====================================================
 // UPDATE ITEM
 // =====================================================
 
-const updateItem = async (req, res) => {
-  try {
-    const itemId = req.params.id;
+const updateItem =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const itemId =
+        req.params.id;
 
-    const {
-      name,
-      category,
-      asset_code,
-      description,
-      condition_status,
-    } = req.body;
 
-    if (!name || name.trim() === "") {
-      return res.status(400).json({
-        success: false,
-        message: "Item name is required.",
-      });
-    }
+      const {
+        name,
+        category,
+        asset_code,
+        description,
+        condition_status,
+      } = req.body;
 
-    const [result] = await database.query(
-      `
-      UPDATE items
-      SET
-        name = ?,
-        category = ?,
-        asset_code = ?,
-        description = ?,
-        condition_status = ?
-      WHERE id = ?
-      `,
-      [
-        name.trim(),
 
-        category?.trim() || null,
+      if (
+        !name ||
+        name.trim() ===
+          ""
+      ) {
+        return res
+          .status(400)
+          .json({
+            success:
+              false,
 
-        asset_code?.trim() || null,
+            message:
+              "Item name is required.",
+          });
+      }
 
-        description?.trim() || null,
 
-        condition_status || "good",
+      const [result] =
+        await database.query(
+          `
+          UPDATE items
+          SET
+            name = ?,
+            category = ?,
+            asset_code = ?,
+            description = ?,
+            condition_status = ?
+          WHERE id = ?
+          `,
+          [
+            name.trim(),
 
+            category?.trim() ||
+              null,
+
+            asset_code?.trim() ||
+              null,
+
+            description?.trim() ||
+              null,
+
+            condition_status ||
+              "good",
+
+            itemId,
+          ]
+        );
+
+
+      if (
+        result.affectedRows ===
+        0
+      ) {
+        return res
+          .status(404)
+          .json({
+            success:
+              false,
+
+            message:
+              "Equipment not found.",
+          });
+      }
+
+
+      emitEquipmentUpdated(
+        req,
         itemId,
-      ]
-    );
+        "updated"
+      );
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Equipment not found.",
-      });
-    }
 
-    res.json({
-      success: true,
-      message:
-        "Equipment updated successfully.",
-    });
-  } catch (error) {
-    console.error(
-      "Update item error:",
-      error.message
-    );
+      res.json({
+        success: true,
 
-    if (error.code === "ER_DUP_ENTRY") {
-      return res.status(409).json({
-        success: false,
         message:
-          "That asset code is already being used.",
+          "Equipment updated successfully.",
+      });
+    } catch (error) {
+      console.error(
+        "Update item error:",
+        error.message
+      );
+
+
+      if (
+        error.code ===
+        "ER_DUP_ENTRY"
+      ) {
+        return res
+          .status(409)
+          .json({
+            success:
+              false,
+
+            message:
+              "That asset code is already being used.",
+          });
+      }
+
+
+      res.status(
+        500
+      ).json({
+        success: false,
+
+        message:
+          "Could not update equipment.",
       });
     }
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Could not update equipment.",
-    });
-  }
-};
+  };
 
 
 // =====================================================
 // ARCHIVE ITEM
-//
-// Archive = temporary removal.
-//
-// Archived equipment:
-// - stays in database
-// - disappears from borrower side
-// - can be restored later
 // =====================================================
 
-const archiveItem = async (req, res) => {
-  try {
-    const itemId = req.params.id;
+const archiveItem =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const itemId =
+        req.params.id;
 
-    const [result] = await database.query(
-      `
-      UPDATE items
-      SET is_active = FALSE
-      WHERE id = ?
-      `,
-      [itemId]
-    );
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
+      const [result] =
+        await database.query(
+          `
+          UPDATE items
+          SET is_active = FALSE
+          WHERE id = ?
+          `,
+          [
+            itemId,
+          ]
+        );
+
+
+      if (
+        result.affectedRows ===
+        0
+      ) {
+        return res
+          .status(404)
+          .json({
+            success:
+              false,
+
+            message:
+              "Equipment not found.",
+          });
+      }
+
+
+      emitEquipmentUpdated(
+        req,
+        itemId,
+        "archived"
+      );
+
+
+      res.json({
+        success: true,
+
+        message:
+          "Equipment archived. It is now hidden from borrowers.",
+      });
+    } catch (error) {
+      console.error(
+        "Archive item error:",
+        error.message
+      );
+
+
+      res.status(
+        500
+      ).json({
         success: false,
-        message: "Equipment not found.",
+
+        message:
+          "Could not archive equipment.",
       });
     }
-
-    res.json({
-      success: true,
-      message:
-        "Equipment archived. It is now hidden from borrowers.",
-    });
-  } catch (error) {
-    console.error(
-      "Archive item error:",
-      error.message
-    );
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Could not archive equipment.",
-    });
-  }
-};
+  };
 
 
 // =====================================================
 // RESTORE ITEM
-//
-// Makes archived equipment active again.
-// It becomes visible to borrowers again.
 // =====================================================
 
-const restoreItem = async (req, res) => {
-  try {
-    const itemId = req.params.id;
+const restoreItem =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const itemId =
+        req.params.id;
 
-    const [result] = await database.query(
-      `
-      UPDATE items
-      SET is_active = TRUE
-      WHERE id = ?
-      `,
-      [itemId]
-    );
 
-    if (result.affectedRows === 0) {
-      return res.status(404).json({
+      const [result] =
+        await database.query(
+          `
+          UPDATE items
+          SET is_active = TRUE
+          WHERE id = ?
+          `,
+          [
+            itemId,
+          ]
+        );
+
+
+      if (
+        result.affectedRows ===
+        0
+      ) {
+        return res
+          .status(404)
+          .json({
+            success:
+              false,
+
+            message:
+              "Equipment not found.",
+          });
+      }
+
+
+      emitEquipmentUpdated(
+        req,
+        itemId,
+        "restored"
+      );
+
+
+      res.json({
+        success: true,
+
+        message:
+          "Equipment restored and available again.",
+      });
+    } catch (error) {
+      console.error(
+        "Restore item error:",
+        error.message
+      );
+
+
+      res.status(
+        500
+      ).json({
         success: false,
-        message: "Equipment not found.",
+
+        message:
+          "Could not restore equipment.",
       });
     }
-
-    res.json({
-      success: true,
-      message:
-        "Equipment restored and available again.",
-    });
-  } catch (error) {
-    console.error(
-      "Restore item error:",
-      error.message
-    );
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Could not restore equipment.",
-    });
-  }
-};
+  };
 
 
 // =====================================================
 // PERMANENT DELETE ITEM
 //
-// Permanently removes an item from the database.
-//
-// If the equipment already has reservation history,
-// deletion is blocked so old records are not broken.
+// If reservation history exists, deletion is blocked.
 // =====================================================
 
-const deleteItem = async (req, res) => {
-  try {
-    const itemId = req.params.id;
-
-    // Check if equipment exists
-    const [items] = await database.query(
-      `
-      SELECT
-        id,
-        name
-      FROM items
-      WHERE id = ?
-      LIMIT 1
-      `,
-      [itemId]
-    );
-
-    if (items.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Equipment not found.",
-      });
-    }
+const deleteItem =
+  async (
+    req,
+    res
+  ) => {
+    try {
+      const itemId =
+        req.params.id;
 
 
-    // Check whether the item has reservation history
-    const [history] = await database.query(
-      `
-      SELECT COUNT(*) AS total
-      FROM reservation_items
-      WHERE item_id = ?
-      `,
-      [itemId]
-    );
+      const [items] =
+        await database.query(
+          `
+          SELECT
+            id,
+            name
+          FROM items
+          WHERE id = ?
+          LIMIT 1
+          `,
+          [
+            itemId,
+          ]
+        );
 
-    if (Number(history[0].total) > 0) {
-      return res.status(409).json({
-        success: false,
+
+      if (
+        items.length ===
+        0
+      ) {
+        return res
+          .status(404)
+          .json({
+            success:
+              false,
+
+            message:
+              "Equipment not found.",
+          });
+      }
+
+
+      const [history] =
+        await database.query(
+          `
+          SELECT COUNT(*) AS total
+          FROM reservation_items
+          WHERE item_id = ?
+          `,
+          [
+            itemId,
+          ]
+        );
+
+
+      if (
+        Number(
+          history[0].total
+        ) > 0
+      ) {
+        return res
+          .status(409)
+          .json({
+            success:
+              false,
+
+            message:
+              "This equipment already has reservation history and cannot be permanently deleted. Archive it instead.",
+          });
+      }
+
+
+      await database.query(
+        `
+        DELETE FROM items
+        WHERE id = ?
+        `,
+        [
+          itemId,
+        ]
+      );
+
+
+      emitEquipmentUpdated(
+        req,
+        itemId,
+        "deleted"
+      );
+
+
+      res.json({
+        success: true,
+
         message:
-          "This equipment already has reservation history and cannot be permanently deleted. Archive it instead.",
+          "Equipment permanently deleted.",
+      });
+    } catch (error) {
+      console.error(
+        "Delete equipment error:",
+        error.message
+      );
+
+
+      res.status(
+        500
+      ).json({
+        success: false,
+
+        message:
+          "Could not permanently delete equipment.",
       });
     }
+  };
 
-
-    // Permanently delete equipment
-    await database.query(
-      `
-      DELETE FROM items
-      WHERE id = ?
-      `,
-      [itemId]
-    );
-
-    res.json({
-      success: true,
-      message:
-        "Equipment permanently deleted.",
-    });
-  } catch (error) {
-    console.error(
-      "Delete equipment error:",
-      error.message
-    );
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Could not permanently delete equipment.",
-    });
-  }
-};
-
-
-// =====================================================
-// EXPORT CONTROLLER FUNCTIONS
-// =====================================================
 
 module.exports = {
   getAllItems,
