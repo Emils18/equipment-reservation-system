@@ -15,10 +15,10 @@ const COOKIE_AGE =
 
 const cookieOptions = {
   httpOnly: true,
-  sameSite: "lax",
 
-  secure:
-    process.env.NODE_ENV === "production",
+  sameSite: "none",
+
+  secure: true,
 
   maxAge: COOKIE_AGE,
 };
