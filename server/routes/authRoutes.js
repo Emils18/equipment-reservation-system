@@ -24,6 +24,7 @@ const express =
 
 const {
   setupStatus,
+  register,
   login,
   me,
   logout,
@@ -57,10 +58,16 @@ router.post(
   login
 );
 
-
+router.post(
+  "/register",
+  register
+);
 // =====================================================
 // STAFF ONLY
 // =====================================================
+
+
+
 
 router.get(
   "/me",
