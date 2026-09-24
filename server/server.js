@@ -66,12 +66,13 @@ const io =
     httpServer,
     {
       cors: {
-              origin: [
-          process.env.CLIENT_URL,
-          "http://localhost:5173",
-        ],
-        credentials: true,
-      },
+          origin: [
+            process.env.CLIENT_URL,
+            "http://localhost:5173",
+          ].filter(Boolean),
+
+          credentials: true,
+        },
     }
   );
 
@@ -86,10 +87,10 @@ app.set("io", io);
 
 app.use(
   cors({
-              origin: [
-            process.env.CLIENT_URL,
-            "http://localhost:5173",
-          ],
+    origin: [
+      process.env.CLIENT_URL,
+      "http://localhost:5173",
+    ].filter(Boolean),
 
     credentials: true,
   })
