@@ -34,6 +34,7 @@ import Track from "./pages/borrower/Track";
 
 // Staff Pages
 import Login from "./pages/staff/Login";
+import Register from "./pages/staff/Register";
 import Dashboard from "./pages/staff/Dashboard";
 import Requests from "./pages/staff/Requests";
 import Borrowed from "./pages/staff/Borrowed";
@@ -139,7 +140,12 @@ function App() {
           <Login />
         }
       />
-
+<Route
+  path="/staff/register"
+  element={
+    <Register />
+  }
+/>
 
       {/* ===============================================
           STAFF PANEL
