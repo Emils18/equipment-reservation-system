@@ -122,10 +122,8 @@ app.use(
   express.json()
 );
 
-app.options("*", cors());
 
-// routes below
-app.use("/api/auth", authRoutes);
+
 
 
 // =====================================================
