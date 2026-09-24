@@ -87,12 +87,33 @@ app.set("io", io);
 
 app.use(
   cors({
-    origin: [
-      process.env.CLIENT_URL,
-      "http://localhost:5173",
-    ].filter(Boolean),
+    origin: function (origin, callback) {
 
+      const allowedOrigins = [
+        process.env.CLIENT_URL,
+        "http://localhost:5173",
+        "https://equipment-reservation-system-p4x8kt02c.vercel.app"
+      ];
+
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(null, false);
+      }
+
+    },
     credentials: true,
+    methods: [
+      "GET",
+      "POST",
+      "PUT",
+      "DELETE",
+      "OPTIONS"
+    ],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization"
+    ]
   })
 );
 
@@ -100,6 +121,11 @@ app.use(
 app.use(
   express.json()
 );
+
+app.options("*", cors());
+
+// routes below
+app.use("/api/auth", authRoutes);
 
 
 // =====================================================
