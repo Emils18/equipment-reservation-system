@@ -92,7 +92,8 @@ app.use(
       const allowedOrigins = [
         process.env.CLIENT_URL,
         "http://localhost:5173",
-        "https://equipment-reservation-system-p4x8kt02c.vercel.app"
+        "https://equipment-reservation-system-p4x8kt02c.vercel.app",
+        "https://equipment-reserve.vercel.app"
       ];
 
       if (!origin || allowedOrigins.includes(origin)) {
