@@ -22,3 +22,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+
+
+cd
+del
+ipconfig
+netsh
+npm
+rmdir
+vite
+client@0.0.0
